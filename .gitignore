@@ -1,7 +1,6 @@
 .env
 *.md
 *.json
-*.py
 *.txt
 *.csv
 *.xls
