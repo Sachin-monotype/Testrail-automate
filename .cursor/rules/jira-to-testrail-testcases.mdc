@@ -1,0 +1,116 @@
+---
+description: Generate TestRail JSON from a Jira issue key, routed by ticket type (API, GraphQL, UI, RabbitMQ). Produces split per-category JSON files under generated/<ISSUE_KEY>/ with refs set to the Jira key.
+alwaysApply: true
+---
+
+# Jira → TestRail JSON generation workflow
+
+When the user's message is a Jira issue key — a bare string matching `[A-Z]+-[0-9]+` (e.g. `PROJ-123`) with nothing else — **immediately and silently begin executing Steps 1–5 below**. Do not greet, do not ask questions, do not explain what you are about to do. Just start working. The first thing the user should see is progress or the finished files.
+
+---
+
+## Step 1 — Resolve cloudId
+
+Read the tool schema at `/Users/Sharad/.cursor/projects/Users-Sharad-Desktop-MTF-REPOS-Testrail-automate/mcps/user-Atlassian-MCP-Server/tools/getAccessibleAtlassianResources.json`, then call `getAccessibleAtlassianResources` (server: `user-Atlassian-MCP-Server`) to obtain the `cloudId` for the user's Jira site.
+
+## Step 2 — Fetch the Jira ticket
+
+Read the tool schema at `/Users/Sharad/.cursor/projects/Users-Sharad-Desktop-MTF-REPOS-Testrail-automate/mcps/user-Atlassian-MCP-Server/tools/getJiraIssue.json`, then call `getJiraIssue` with:
+- `cloudId`: resolved above
+- `issueIdOrKey`: the key provided by the user
+- `responseContentFormat`: `"markdown"`
+
+Capture: `summary`, `description`, `labels`, `components`, `issuetype.name`, and any linked issues' keys.
+
+## Step 3 — Classify into categories
+
+Scan the summary, description, labels, and component names using the following keywords. A ticket may match **multiple** categories; treat each match independently.
+
+| Category | Match signals |
+|---|---|
+| **api** | REST, HTTP, endpoint, status code, request, response, payload, header, auth token, 401, 403, 404, 500, curl, axios, fetch, openapi, swagger |
+| **graphql** | GraphQL, gql, query, mutation, subscription, schema, resolver, `errors` array, variables, fragments |
+| **ui** | UI, frontend, page, screen, button, form, modal, navigation, browser, selenium, playwright, cypress, accessibility, smoke test, visual |
+| **rabbitmq** | RabbitMQ, queue, exchange, routing key, publish, consume, ack, nack, dead-letter, DLQ, message broker, AMQP |
+
+If no keywords match, use the Jira `issuetype` name as a fallback heuristic, or default to `api` and note the assumption in the case titles.
+
+## Step 4 — Write test-case JSON (split per category)
+
+For **each matched category**, create one file:
+
+```
+generated/<ISSUE_KEY>/<category>/testcases.json
+```
+
+- Only create folders/files for matched categories.
+- Each file contains `{ "cases": [ ... ] }`.
+
+### Required fields on every case object
+
+```json
+{
+  "title": "<Concise scenario scoped to the ticket>",
+  "refs": "<ISSUE_KEY>",
+  "priority_id": 3,
+  "estimate": "10m",
+  "custom_preconds": "<Setup / preconditions>",
+  "custom_steps_separated": [
+    { "content": "<Step>", "expected": "<Expected result>" }
+  ]
+}
+```
+
+- `refs` **must** equal the Jira issue key (comma-separated if the ticket links additional issues, e.g. `"PROJ-123, PROJ-99"`).
+- Do **not** include `type_id`; the uploader strips it to avoid instance conflicts.
+- `priority_id` must always be `3` (Medium) on every case.
+- `estimate` must always be `"10m"` on every case.
+
+### Per-category coverage checklist
+
+**api** — include cases covering:
+- Happy-path request (valid params, expected 2xx).
+- Auth failure (401/403) when credentials are missing or invalid.
+- Validation errors (400) for malformed/missing required fields.
+- Not-found (404) for unknown resource IDs.
+- Edge cases mentioned in the ticket (pagination, filters, rate limits if relevant).
+
+**graphql** — include cases covering:
+- Valid query/mutation returns expected data shape.
+- Auth-guarded operation rejected without token.
+- Invalid variable types return structured `errors` array.
+- Partial data with `errors` (nullable field fails while others succeed).
+- Schema introspection disabled in production (if relevant).
+
+**ui** — include cases covering:
+- Successful happy-path user flow (from entry point to success state).
+- Field validation errors shown inline for invalid input.
+- Navigation/routing (correct URL, breadcrumb, back button).
+- Loading and error states visible to user.
+- Accessibility: keyboard navigation and ARIA labels (if ticket mentions a11y).
+
+**rabbitmq** — include cases covering:
+- Message published to correct exchange/routing key and consumed by target queue.
+- Consumer processes valid message and acks successfully.
+- Malformed message is rejected/nacked and routed to DLQ.
+- Duplicate/idempotent message handled without side effects.
+- Consumer failure (simulated) causes requeue or DLQ routing.
+
+## Step 5 — Report and offer upload
+
+After writing all files, print a summary listing every created path. Then tell the user:
+
+> Files are ready. To upload, set `TESTRAIL_JSON_FILE=generated/<ISSUE_KEY>/<category>/testcases.json` in your `.env` and run `python create_testcases.py`. Repeat for each category file.
+
+Do **not** run the upload automatically unless the user explicitly asks.
+
+---
+
+## Important constraints
+
+- **Auto-execute**: Never ask clarifying questions when a Jira key is provided — proceed through all steps autonomously.
+- Always read MCP tool schema files before calling any MCP tool.
+- Never fabricate ticket content — if `getJiraIssue` returns an error, stop and report it clearly.
+- Case titles must be written in natural, readable language — technical terms are fine but the title should read like a plain English sentence describing what is being tested. Avoid jargon-only titles. Do **not** include the Jira issue key in the title. The issue key belongs only in the `refs` field. Examples of good titles: "User gets a 401 error when logging in without a valid token", "Submitting the form with an empty email field shows an inline validation message", "Message is delivered to the dead-letter queue when the consumer crashes mid-processing".
+- Generated files live under `generated/` in the workspace root.
+- Only stop to ask the user if the MCP call fails or the ticket key cannot be resolved.

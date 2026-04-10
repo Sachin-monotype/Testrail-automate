@@ -1,6 +1,7 @@
 .env
 *.md
 *.json
+!generated/**/*.json
 *.txt
 *.csv
 *.xls

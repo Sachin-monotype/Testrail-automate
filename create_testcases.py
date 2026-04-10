@@ -46,7 +46,22 @@ def upload_test_cases():
         print("Error: Set TESTRAIL_PASSWORD and/or TESTRAIL_API_KEY in .env (see .env.example).")
         return
 
-    # 1. Load data from JSON file
+    # 1. Print env summary and ask for confirmation before doing anything
+    print("=" * 60)
+    print("=== Environment Summary ===")
+    print("=" * 60)
+    print(f"  TestRail URL  : {TESTRAIL_URL}")
+    print(f"  Username      : {USERNAME}")
+    print(f"  Section ID    : {SECTION_ID}")
+    print(f"  JSON File     : {JSON_FILE_PATH}")
+    print("=" * 60)
+    confirm = input("\nDoes this look correct? Type 'yes' to proceed or anything else to abort: ").strip().lower()
+    if confirm != "yes":
+        print("Aborted. No test cases were uploaded.")
+        return
+    print()
+
+    # 2. Load data from JSON file
     try:
         with open(JSON_FILE_PATH, 'r') as f:
             data = json.load(f)
@@ -57,7 +72,7 @@ def upload_test_cases():
         print(f"Error: Invalid JSON format in {JSON_FILE_PATH}. {e}")
         return
 
-    # 2. Extract cases array from JSON
+    # 3. Extract cases array from JSON
     # Handle both formats: direct array or object with 'cases' key
     if isinstance(data, list):
         cases = data
@@ -71,7 +86,7 @@ def upload_test_cases():
         print("Error: No test cases found in JSON file.")
         return
 
-    # 3. Test authentication first with a simple GET request
+    # 4. Test authentication first with a simple GET request
     print("Testing authentication...")
     auth_password = AUTH_PASSWORD
     auth = (USERNAME, auth_password)
@@ -94,13 +109,13 @@ def upload_test_cases():
             print(f"Please verify your credentials.")
             return
 
-    # 4. Setup API details for adding cases
+    # 5. Setup API details for adding cases
     # Endpoint: add_case/{section_id} (singular - adds one case at a time)
     url = f"{TESTRAIL_URL}/index.php?/api/v2/add_case/{SECTION_ID}"
     headers = {'Content-Type': 'application/json'}
     auth = (USERNAME, auth_password)
 
-    # 5. Send POST request for each case
+    # 6. Send POST request for each case
     total_cases = len(cases)
     print(f"Uploading {total_cases} cases to section {SECTION_ID}...")
     print(f"Progress will be shown every 10 cases\n")
@@ -141,7 +156,7 @@ def upload_test_cases():
         if idx < total_cases:
             time.sleep(REQUEST_DELAY)
 
-    # 6. Summary
+    # 7. Summary
     print(f"\n{'='*60}")
     print(f"=== Summary ===")
     print(f"{'='*60}")
